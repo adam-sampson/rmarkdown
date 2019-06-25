@@ -307,18 +307,42 @@ render <- function(input,
   # setup a cleanup function for intermediate files
   intermediates <- c()
   on.exit(if (clean) unlink(intermediates, recursive = TRUE), add = TRUE)
-
+  
+  # If the intermediates_dir is a Windows NFS network directory it is necessary 
+  # to use windows style slashes in the directory names for the 
+  # intermediate files. Otherwise use defaults. If no intermediates_dir is declared
+  # it is necessary to fix the working directory which will be the defacto intermediates_dir
+  winslash <- NULL
+  fsep <- NULL
+  
+  if(is.null(intermediates_dir) & grepl("\\\\\\\\",getwd())){
+    intermediates_dir <- getwd()
+  }
+  if(grepl("\\\\\\\\",intermediates_dir)){
+    winslash <- "\\"
+    fsep <- "\\"
+  }
+  
   # ensure we have a directory to store intermediates
   if (!is.null(intermediates_dir)) {
     if (!dir_exists(intermediates_dir))
       dir.create(intermediates_dir, recursive = TRUE)
-    intermediates_dir <- normalize_path(intermediates_dir)
+    if(is.null(winslash)){
+      intermediates_dir <- normalize_path(intermediates_dir)
+    } else{
+      intermediates_dir <- normalizePath(intermediates_dir)
+    }
   }
   intermediates_loc <- function(file) {
     if (is.null(intermediates_dir))
       file
-    else
-      file.path(intermediates_dir, file)
+    else{
+      if(is.null(fsep)){
+        file.path(intermediates_dir, file)
+      } else {
+        file.path(intermediates_dir, file, fsep = fsep)
+      }
+    }
   }
 
   # resolve output directory before we change the working directory in
@@ -853,11 +877,19 @@ render <- function(input,
       utf8_input <- path.expand(utf8_input)
       output     <- path.expand(output)
 
+      # If the output file is being placed on a Windows NFS shared drive we
+      # need to fix the path to match windows slash formatting
+      if(!is.null(winslash)){
+        pandoc_full_output <- suppressWarnings(normalizePath(output))
+      } else {
+        pandoc_full_output <- output
+      }
+      
       # if we don't detect any invalid shell characters in the
       # target path, then just call pandoc directly
       if (!grepl(.shell_chars_regex, output) && !grepl(.shell_chars_regex, utf8_input)) {
         return(pandoc_convert(
-          utf8_input, pandoc_to, output_format$pandoc$from, output,
+          utf8_input, pandoc_to, output_format$pandoc$from, pandoc_full_output,
           citeproc, output_format$pandoc$args, !quiet
         ))
       }
@@ -878,9 +910,18 @@ render <- function(input,
       # clean up temporary file on exit
       on.exit(unlink(pandoc_output_tmp), add = TRUE)
 
+      # If the output file is being placed on a Windows NFS shared drive we
+      # need to fix the path to match windows slash formatting..but not if it is
+      # on a local drive or non-NFS
+      if(!is.null(winslash)){
+        pandoc_full_output_tmp <- suppressWarnings(normalizePath(pandoc_output_tmp))
+      } else {
+        pandoc_full_output_tmp <- pandoc_output_tmp
+      }
+      
       # call pandoc to render file
       status <- pandoc_convert(
-        utf8_input, pandoc_to, output_format$pandoc$from, pandoc_output_tmp,
+        utf8_input, pandoc_to, output_format$pandoc$from, pandoc_full_output_tmp,
         citeproc, output_format$pandoc$args, !quiet
       )
 
